@@ -1,11 +1,11 @@
 #import "AppleShareplay.h"
+#import "AppleShareplay-Swift.h"
 
 @implementation AppleShareplay
 RCT_EXPORT_MODULE()
 
 - (NSNumber *)multiply:(double)a b:(double)b {
-    NSNumber *result = @(a * b);
-
+    NSNumber *result = [[[SwiftFile alloc] init] multiplyByThree:@(a * b)];
     return result;
 }
 
