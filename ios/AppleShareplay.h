@@ -1,5 +1,5 @@
 #import <AppleShareplaySpec/AppleShareplaySpec.h>
 
-@interface AppleShareplay : NSObject <NativeAppleShareplaySpec>
+@interface AppleShareplay : NativeAppleShareplaySpecBase <NativeAppleShareplaySpec>
 
 @end
