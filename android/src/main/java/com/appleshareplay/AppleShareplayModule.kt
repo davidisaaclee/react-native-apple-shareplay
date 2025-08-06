@@ -1,3 +1,6 @@
+// Android is not supported!
+// I don't know what will happen if you compile this on Android. sorry!
+
 package com.appleshareplay
 
 import com.facebook.react.bridge.ReactApplicationContext
@@ -9,12 +12,6 @@ class AppleShareplayModule(reactContext: ReactApplicationContext) :
 
   override fun getName(): String {
     return NAME
-  }
-
-  // Example method
-  // See https://reactnative.dev/docs/native-modules-android
-  override fun multiply(a: Double, b: Double): Double {
-    return a * b
   }
 
   companion object {
