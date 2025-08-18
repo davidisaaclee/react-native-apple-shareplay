@@ -5,6 +5,11 @@ import type { EventEmitter } from 'react-native/Libraries/Types/CodegenTypes';
 type GroupMessengerRef = number;
 type GroupSessionRef = number;
 type GroupActivityRef = number;
+type GroupSessionJournalRef = number;
+type GroupSessionJournalAttachmentRef = string; // GroupSessionJournal.Attachment.id in Swift
+
+type GroupSessionJournalItem = string;
+type GroupSessionJournalItemMetadata = string;
 
 type GroupMessengerParticipants = { type: 'all' };
 
@@ -60,6 +65,32 @@ export interface Spec extends TurboModule {
     source: GroupMessengerRef;
     message: GroupMessengerMessageIncoming;
   }>;
+
+  // Automatically subscribes to attachments stream. There is currently no way
+  // to unsubscribe.
+  groupSessionJournalCreate(
+    activityRef: GroupActivityRef
+  ): GroupSessionJournalRef;
+  groupSessionJournalAdd(
+    journalRef: GroupSessionJournalRef,
+    item: GroupSessionJournalItem,
+    metadata: GroupSessionJournalItemMetadata
+  ): Promise<GroupSessionJournalAttachmentRef>;
+  groupSessionJournalRemove(
+    journalRef: GroupSessionJournalRef,
+    attachmentRef: GroupSessionJournalAttachmentRef
+  ): Promise<void>;
+  readonly onGroupSessionJournalAttachments: EventEmitter<{
+    source: GroupSessionJournalRef;
+    attachments: GroupSessionJournalAttachmentRef[];
+  }>;
+
+  groupSessionJournalAttachmentLoad(
+    attachmentRef: GroupSessionJournalAttachmentRef
+  ): Promise<GroupSessionJournalItem>;
+  groupSessionJournalAttachmentLoadMetadata(
+    attachmentRef: GroupSessionJournalAttachmentRef
+  ): Promise<GroupSessionJournalItemMetadata>;
 }
 
 export default TurboModuleRegistry.getEnforcing<Spec>('AppleShareplay');
