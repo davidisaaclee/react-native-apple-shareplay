@@ -55,6 +55,14 @@ RCT_EXPORT_MODULE()
           }];
         }];
         [self.observers addObject: observer];
+        
+        observer = [self.impl observeJournalAttachments:^(NSInteger journalRef, NSArray<NSString *> * _Nonnull attachments) {
+          [self emitOnGroupSessionJournalAttachments:@{
+            @"source": @(journalRef),
+            @"attachments": attachments
+          }];
+        }];
+        [self.observers addObject: observer];
       });
     }
     return self;
@@ -106,6 +114,62 @@ RCT_EXPORT_MODULE()
 
 - (void)groupSessionLeave:(double)sessionRef {
   [self.impl leave:(NSInteger)sessionRef];
+}
+
+- (nonnull NSNumber *)groupSessionJournalCreate:(double)sessionRef {
+  return [NSNumber numberWithLong:[self.impl createJournalFor:(NSInteger)sessionRef]];
+}
+
+- (void)groupSessionJournalAdd:(double)journalRef
+                          item:(nonnull NSString *)item
+                      metadata:(nonnull NSString *)metadata
+                       resolve:(nonnull RCTPromiseResolveBlock)resolve
+                        reject:(nonnull RCTPromiseRejectBlock)reject {
+  [self.impl addToJournalWithCompletion:(NSInteger)journalRef item:item metadata:metadata completionHandler:^(NSString * _Nullable attachmentId) {
+    NSLog(@"In completion handler");
+    if (attachmentId) {
+      resolve(attachmentId);
+    } else {
+      reject(@"journal_add_failed", @"Failed to add item to journal", nil);
+    }
+  }];
+}
+
+- (void)groupSessionJournalRemove:(double)journalRef
+                    attachmentRef:(nonnull NSString *)attachmentRef
+                          resolve:(nonnull RCTPromiseResolveBlock)resolve
+                           reject:(nonnull RCTPromiseRejectBlock)reject {
+  [self.impl removeFromJournalWithCompletion:(NSInteger)journalRef attachmentId:attachmentRef completionHandler:^(BOOL success) {
+    if (success) {
+      resolve(nil);
+    } else {
+      reject(@"journal_remove_failed", @"Failed to remove attachment from journal", nil);
+    }
+  }];
+}
+
+- (void)groupSessionJournalAttachmentLoad:(nonnull NSString *)attachmentRef
+                                  resolve:(nonnull RCTPromiseResolveBlock)resolve
+                                   reject:(nonnull RCTPromiseRejectBlock)reject {
+  [self.impl loadJournalAttachmentWithCompletion:attachmentRef completionHandler:^(NSString * _Nullable item) {
+    if (item) {
+      resolve(item);
+    } else {
+      reject(@"journal_load_failed", @"Failed to load journal attachment", nil);
+    }
+  }];
+}
+
+- (void)groupSessionJournalAttachmentLoadMetadata:(nonnull NSString *)attachmentRef
+                                          resolve:(nonnull RCTPromiseResolveBlock)resolve
+                                           reject:(nonnull RCTPromiseRejectBlock)reject {
+  [self.impl loadJournalAttachmentMetadataWithCompletion:attachmentRef completionHandler:^(NSString * _Nullable metadata) {
+    if (metadata) {
+      resolve(metadata);
+    } else {
+      reject(@"journal_load_metadata_failed", @"Failed to load journal attachment metadata", nil);
+    }
+  }];
 }
 
 

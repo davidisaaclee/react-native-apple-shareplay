@@ -69,7 +69,7 @@ export interface Spec extends TurboModule {
   // Automatically subscribes to attachments stream. There is currently no way
   // to unsubscribe.
   groupSessionJournalCreate(
-    activityRef: GroupActivityRef
+    sessionRef: GroupSessionRef
   ): GroupSessionJournalRef;
   groupSessionJournalAdd(
     journalRef: GroupSessionJournalRef,

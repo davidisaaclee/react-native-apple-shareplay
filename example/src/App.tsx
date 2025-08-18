@@ -9,7 +9,13 @@ import AppleSharePlay, {
   GroupSessionStatus,
 } from 'react-native-apple-shareplay';
 import React, { useEffect, useState } from 'react';
-import { Button, EventSubscription, SafeAreaView, Text } from 'react-native';
+import { Button, SafeAreaView, Text } from 'react-native';
+import type { EventSubscription } from 'react-native';
+
+const nextCounter = (() => {
+  let counter = 0;
+  return () => counter++;
+})();
 
 function App(): React.JSX.Element {
   const [eligible, setEligible] = useState<boolean | null>(() =>
@@ -52,26 +58,56 @@ function App(): React.JSX.Element {
           ...prev,
           [opts.source]: AppleSharePlay.groupSessionStatus(opts.source),
         }));
+      }),
+
+      AppleSharePlay.onGroupSessionJournalAttachments(async (opts) => {
+        console.log('Journal attachments received:', opts);
+        for (const attachment of opts.attachments) {
+          console.log(`Attachment: ${attachment}:`);
+          console.log(
+            await AppleSharePlay.groupSessionJournalAttachmentLoad(attachment)
+          );
+          console.log(
+            await AppleSharePlay.groupSessionJournalAttachmentLoadMetadata(
+              attachment
+            )
+          );
+        }
       })
     );
     return () => subscriptions.forEach((x) => x.remove());
   }, []);
 
+  const [journalRef, setJournalRef] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (sessionRef == null) {
+      return;
+    }
+
+    // Do setup and join.
+    setMessengerRef(AppleSharePlay.groupMessengerCreate(sessionRef));
+    // This isn't documented anywhere, but it's apparently important to create
+    // the journal *before* joining the session.
+    setJournalRef(AppleSharePlay.groupSessionJournalCreate(sessionRef));
+    AppleSharePlay.groupSessionJoin(sessionRef);
+  }, [sessionRef]);
+
   return (
     <SafeAreaView>
-      <Text>
+      <Text style={{ color: 'white' }}>
         Eligibility status:{' '}
         {eligible === null ? 'No response' : eligible ? 'Eligible' : 'Not'}
       </Text>
-      <Text>
+      <Text style={{ color: 'white' }}>
         Session reference: {sessionRef == null ? 'None' : sessionRef.toString()}
       </Text>
-      <Text>
+      <Text style={{ color: 'white' }}>
         Messenger reference:{' '}
         {messengerRef == null ? 'None' : messengerRef.toString()}
       </Text>
       {Object.entries(sessionState).map(([ref, status]) => (
-        <Text key={ref}>
+        <Text key={ref} style={{ color: 'white' }}>
           Session {ref} status: {status}
         </Text>
       ))}
@@ -111,14 +147,6 @@ function App(): React.JSX.Element {
       />
 
       <Button
-        title="Create messenger"
-        disabled={sessionRef == null}
-        onPress={() => {
-          setMessengerRef(AppleSharePlay.groupMessengerCreate(sessionRef!));
-        }}
-      />
-
-      <Button
         title="Send message"
         disabled={messengerRef == null}
         onPress={async () => {
@@ -131,6 +159,33 @@ function App(): React.JSX.Element {
             console.log('Sent message');
           } catch (err) {
             console.error('Failed to send message:', err);
+          }
+        }}
+      />
+
+      <Button
+        title="Send journal attachment"
+        disabled={journalRef == null}
+        onPress={async () => {
+          try {
+            console.log('Sending journal attachment...');
+            const attachmentRef = await AppleSharePlay.groupSessionJournalAdd(
+              journalRef!,
+              `journal item ${nextCounter()}`,
+              `journal metadata ${nextCounter()}`
+            );
+            console.log('Journal attachment created:', attachmentRef);
+            console.log(
+              'Fetching attachment data locally:',
+              await AppleSharePlay.groupSessionJournalAttachmentLoad(
+                attachmentRef
+              ),
+              await AppleSharePlay.groupSessionJournalAttachmentLoadMetadata(
+                attachmentRef
+              )
+            );
+          } catch (err) {
+            console.error('Failed to send journal attachment:', err);
           }
         }}
       />

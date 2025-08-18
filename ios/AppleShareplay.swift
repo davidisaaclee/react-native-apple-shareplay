@@ -1,6 +1,7 @@
 import Foundation
 import GroupActivities
 import Combine
+import CoreTransferable
 
 @objc public class AppleSharePlayImpl: NSObject {
   /// Types used to transfer data to/from Obj-C
@@ -8,6 +9,7 @@ import Combine
     public typealias GroupActivityRef = Int
     public typealias GroupMessengerRef = Int
     public typealias GroupSessionRef = Int
+    public typealias GroupSessionJournalRef = Int
     public typealias GroupMessengerMessage = Data
 
     public typealias GroupSessionStatus = String
@@ -25,7 +27,7 @@ import Combine
     }
 
     @objc public class GroupMessengerParticipants: NSObject {}
-  }
+   }
 
   private var indexGenerator = stride(from: 0, through: Int.max, by: 1).makeIterator()
   private let groupStateObserver = GroupStateObserver()
@@ -34,6 +36,11 @@ import Combine
   private var groupActivities: [T.GroupActivityRef: T.DynamicGroupActivity] = [:]
   private var groupMessengers: [T.GroupMessengerRef: GroupSessionMessenger] = [:]
   private var groupSessions: [T.GroupSessionRef: GroupSession<T.DynamicGroupActivity>] = [:]
+  private var groupSessionJournals: [T.GroupSessionJournalRef: Any] = [:]
+  private var journalAttachments: [String: GroupSessionJournal.Attachment] = [:]
+  /** Group Activities API fails when attempting to load attachment that this user sent. Store that
+   data here and check it before trying to load any attachment to avoid an unexpected error. */
+  private var journalAttachmentsOverrides: [String: (item: String, metadata: String?)] = [:]
 
   private var tasks: Set<Task<Void, any Error>> = []
   private var subscriptions: Set<AnyCancellable> = []
@@ -46,6 +53,9 @@ import Combine
 
   /** When a session's state changes, publishes the ref for the affected session */
   let sessionStatePublisher = PassthroughSubject<T.GroupSessionRef, Never>()
+
+  /** When journal attachments change, publishes the journal ref and attachment IDs */
+  let journalAttachmentsPublisher = PassthroughSubject<(source: T.GroupSessionJournalRef, attachments: [String]), Never>()
 
   @discardableResult
   @objc public func observeGroupSharingEligbility(_ listener: @escaping (Bool) -> Void) -> () -> Void {
@@ -72,9 +82,10 @@ import Combine
   private func register(_ session: GroupSession<T.DynamicGroupActivity>) -> T.GroupSessionRef {
     let sessionRef = groupSessions.insert(session, takingIndexFrom: &indexGenerator)
     subscriptions.insert(
-      session.$state.sink { [weak self] _ in
-        self?.sessionStatePublisher.send(sessionRef)
-      }
+      session.$state
+        .sink { [weak self] _ in
+          self?.sessionStatePublisher.send(sessionRef)
+        }
     )
     return sessionRef
   }
@@ -161,6 +172,177 @@ import Combine
     _ listener: @escaping (T.GroupSessionRef) -> Void
   ) -> () -> Void {
     let cancellable = self.sessionStatePublisher.sink(receiveValue: listener)
+    return { cancellable.cancel() }
+  }
+
+  // MARK: GroupSessionJournal APIs
+
+  @objc public func createJournal(for sessionRef: T.GroupSessionRef) -> T.GroupSessionJournalRef {
+    let session = groupSessions[sessionRef]!
+    let journal = GroupSessionJournal(session: session)
+    let journalRef = groupSessionJournals.insert(journal, takingIndexFrom: &indexGenerator)
+
+    // Automatically subscribe to attachments stream
+    let task = Task<Void, any Error> {
+      for await attachments in journal.attachments {
+        let attachmentIds = attachments.map { attachment in
+          let attachmentId = attachment.id.uuidString
+          self.journalAttachments[attachmentId] = attachment
+          return attachmentId
+        }
+        self.journalAttachmentsPublisher.send((source: journalRef, attachments: attachmentIds))
+      }
+    }
+    tasks.insert(task)
+
+    return journalRef
+  }
+
+  @objc public func addToJournal(
+    _ journalRef: T.GroupSessionJournalRef,
+    item: String,
+    metadata: String
+  ) async -> String? {
+    guard let journal = groupSessionJournals[journalRef] as? GroupSessionJournal else {
+      print("Failed to get journal for ref:", journalRef)
+      return nil
+    }
+
+    do {
+      let journalItem = item
+      let journalMetadata = metadata
+
+      let attachment = try await Task(priority: .userInitiated) {
+        try await journal.add(journalItem, metadata: journalMetadata)
+      }.value
+      let attachmentId = attachment.id.uuidString
+      journalAttachments[attachmentId] = attachment
+      journalAttachmentsOverrides[attachmentId] = (item: journalItem, metadata: metadata)
+
+      return attachmentId
+    } catch {
+      print("Failed to add journal item: \(error)")
+      return nil
+    }
+  }
+
+  @available(iOS 17.0, *)
+  @objc public func addToJournalWithCompletion(
+    _ journalRef: T.GroupSessionJournalRef,
+    item: String,
+    metadata: String,
+    completionHandler: @escaping (String?) -> Void
+  ) {
+    let task = Task<Void, any Error> {
+      let result = await addToJournal(journalRef, item: item, metadata: metadata)
+
+      // not sure if this MainActor.run is necessary
+      await MainActor.run {
+        completionHandler(result)
+      }
+    }
+    tasks.insert(task)
+  }
+
+  @available(iOS 17.0, *)
+  @objc public func removeFromJournal(
+    _ journalRef: T.GroupSessionJournalRef,
+    attachmentId: String
+  ) async -> Bool {
+    guard let journal = groupSessionJournals[journalRef] as? GroupSessionJournal,
+          let attachment = journalAttachments[attachmentId] else {
+      return false
+    }
+
+    do {
+      try await journal.remove(attachment: attachment)
+      journalAttachments.removeValue(forKey: attachmentId)
+      return true
+    } catch {
+      print("Failed to remove journal attachment: \(error)")
+      return false
+    }
+  }
+
+  @available(iOS 17.0, *)
+  @objc public func removeFromJournalWithCompletion(
+    _ journalRef: T.GroupSessionJournalRef,
+    attachmentId: String,
+    completionHandler: @escaping (Bool) -> Void
+  ) {
+    Task {
+      let result = await removeFromJournal(journalRef, attachmentId: attachmentId)
+      await MainActor.run {
+        completionHandler(result)
+      }
+    }
+  }
+
+  @available(iOS 17.0, *)
+  @objc public func loadJournalAttachment(_ attachmentId: String) async -> String? {
+    if let override = journalAttachmentsOverrides[attachmentId] {
+      return override.item
+    }
+
+    guard let attachment = journalAttachments[attachmentId] else { return nil }
+
+    do {
+      return try await attachment.load(String.self)
+    } catch {
+      print("Failed to load journal attachment: \(error)")
+      return nil
+    }
+  }
+
+  @available(iOS 17.0, *)
+  @objc public func loadJournalAttachmentWithCompletion(
+    _ attachmentId: String,
+    completionHandler: @escaping (String?) -> Void
+  ) {
+    Task {
+      let result = await loadJournalAttachment(attachmentId)
+      await MainActor.run {
+        completionHandler(result)
+      }
+    }
+  }
+
+  @available(iOS 17.0, *)
+  @objc public func loadJournalAttachmentMetadata(_ attachmentId: String) async -> String? {
+    if let override = journalAttachmentsOverrides[attachmentId] {
+      return override.metadata
+    }
+
+    guard let attachment = journalAttachments[attachmentId] else { return nil }
+
+    do {
+      return try await attachment.loadMetadata(of: String.self)
+    } catch {
+      print("Failed to load journal attachment metadata: \(error)")
+      return nil
+    }
+  }
+
+  @available(iOS 17.0, *)
+  @objc public func loadJournalAttachmentMetadataWithCompletion(
+    _ attachmentId: String,
+    completionHandler: @escaping (String?) -> Void
+  ) {
+    Task {
+      let result = await loadJournalAttachmentMetadata(attachmentId)
+      await MainActor.run {
+        completionHandler(result)
+      }
+    }
+  }
+
+  @discardableResult
+  @objc public func observeJournalAttachments(
+    _ listener: @escaping (T.GroupSessionJournalRef, [String]) -> Void
+  ) -> () -> Void {
+    let cancellable = journalAttachmentsPublisher
+      .receive(on: DispatchQueue.main)
+      .sink(receiveValue: listener)
     return { cancellable.cancel() }
   }
 }
