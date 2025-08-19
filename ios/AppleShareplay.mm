@@ -23,7 +23,8 @@ RCT_EXPORT_MODULE()
 
       // Calling `emitOnGroupSharingEligbilityChange` during init causes a bad_function_call error.
       // Avoid by delaying subscription a bit.
-      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+      dispatch_queue_t backgroundQueue = dispatch_get_global_queue(QOS_CLASS_BACKGROUND, 0);
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)), backgroundQueue, ^{
         id observer;
         observer = [self.impl observeGroupSharingEligbility:^(BOOL success) {
           [self emitOnGroupSharingEligbilityChange:@{@"eligible": @(success)}];
@@ -31,10 +32,12 @@ RCT_EXPORT_MODULE()
         [self.observers addObject: observer];
 
         observer = [self.impl observeGroupActivitySession:^(NSInteger activityRef, NSInteger sessionRef) {
-          [self emitOnGroupActivitySession:@{
-            @"source": @(activityRef),
-            @"session": @(sessionRef)
-          }];
+          dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)), backgroundQueue, ^{
+            [self emitOnGroupActivitySession:@{
+              @"source": @(activityRef),
+              @"session": @(sessionRef)
+            }];
+          });
         }];
         [self.observers addObject: observer];
 
@@ -50,9 +53,11 @@ RCT_EXPORT_MODULE()
         [self.observers addObject: observer];
 
         observer = [self.impl observeGroupSessionStatus:^(NSInteger sessionRef) {
-          [self emitOnGroupSessionStatusChanged:@{
-            @"source": @(sessionRef)
-          }];
+          dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)), backgroundQueue, ^{
+                                [self emitOnGroupSessionStatusChanged:@{
+                                  @"source": @(sessionRef)
+                                }];
+          });
         }];
         [self.observers addObject: observer];
         
