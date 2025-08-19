@@ -9,7 +9,7 @@ import AppleSharePlay, {
   GroupSessionStatus,
 } from 'react-native-apple-shareplay';
 import React, { useEffect, useState } from 'react';
-import { Button, SafeAreaView, Text } from 'react-native';
+import { Appearance, Button, SafeAreaView, Text } from 'react-native';
 import type { EventSubscription } from 'react-native';
 
 const nextCounter = (() => {
@@ -93,21 +93,23 @@ function App(): React.JSX.Element {
     AppleSharePlay.groupSessionJoin(sessionRef);
   }, [sessionRef]);
 
+  const textColor = Appearance.getColorScheme() === 'dark' ? 'white' : 'black';
+
   return (
     <SafeAreaView>
-      <Text style={{ color: 'white' }}>
+      <Text style={{ color: textColor }}>
         Eligibility status:{' '}
         {eligible === null ? 'No response' : eligible ? 'Eligible' : 'Not'}
       </Text>
-      <Text style={{ color: 'white' }}>
+      <Text style={{ color: textColor }}>
         Session reference: {sessionRef == null ? 'None' : sessionRef.toString()}
       </Text>
-      <Text style={{ color: 'white' }}>
+      <Text style={{ color: textColor }}>
         Messenger reference:{' '}
         {messengerRef == null ? 'None' : messengerRef.toString()}
       </Text>
       {Object.entries(sessionState).map(([ref, status]) => (
-        <Text key={ref} style={{ color: 'white' }}>
+        <Text key={ref} style={{ color: textColor }}>
           Session {ref} status: {status}
         </Text>
       ))}
