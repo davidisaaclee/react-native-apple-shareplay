@@ -10,6 +10,7 @@ import CoreTransferable
     public typealias GroupMessengerRef = Int
     public typealias GroupSessionRef = Int
     public typealias GroupSessionJournalRef = Int
+    public typealias GroupSessionJournalAttachmentRef = String
     public typealias GroupMessengerMessage = Data
 
     public typealias GroupSessionStatus = String
@@ -36,13 +37,13 @@ import CoreTransferable
   private var groupActivities: [T.GroupActivityRef: T.DynamicGroupActivity] = [:]
   private var groupMessengers: [T.GroupMessengerRef: GroupSessionMessenger] = [:]
   private var groupSessions: [T.GroupSessionRef: GroupSession<T.DynamicGroupActivity>] = [:]
-  private var groupSessionJournals: [T.GroupSessionJournalRef: Any] = [:]
-  private var journalAttachments: [String: GroupSessionJournal.Attachment] = [:]
+  private var groupSessionJournals: [T.GroupSessionJournalRef: GroupSessionJournal] = [:]
+  private var journalAttachments: [T.GroupSessionJournalAttachmentRef: GroupSessionJournal.Attachment] = [:]
   /** Group Activities API fails when attempting to load attachment that this user sent. Store that
    data here and check it before trying to load any attachment to avoid an unexpected error. */
-  private var journalAttachmentsOverrides: [String: (item: String, metadata: String?)] = [:]
+  private var journalAttachmentsOverrides: [T.GroupSessionJournalAttachmentRef: (item: String, metadata: String?)] = [:]
 
-  private var tasks: Set<Task<Void, any Error>> = []
+  private var tasks: Set<Task<Void, any Swift.Error>> = []
   private var subscriptions: Set<AnyCancellable> = []
 
   var groupSharingEligibilityPublisher: AnyPublisher<Bool, Never> {
@@ -56,7 +57,17 @@ import CoreTransferable
 
   /** When journal attachments change, publishes the journal ref and attachment IDs */
   let journalAttachmentsPublisher = PassthroughSubject<(source: T.GroupSessionJournalRef, attachments: [String]), Never>()
-
+  
+  private func getSession(_ ref: T.GroupSessionRef) throws -> GroupSession<T.DynamicGroupActivity> {
+    guard let session = groupSessions[ref] else { throw Error.invalidSessionRef(ref) }
+    return session
+  }
+  
+  private func getJournal(_ ref: T.GroupSessionJournalRef) throws -> GroupSessionJournal {
+    guard let session = groupSessionJournals[ref] else { throw Error.invalidJournalRef(ref) }
+    return session
+  }
+  
   @discardableResult
   @objc public func observeGroupSharingEligbility(_ listener: @escaping (Bool) -> Void) -> () -> Void {
     let cancellable = groupSharingEligibilityPublisher.sink(receiveValue: listener)
@@ -91,7 +102,7 @@ import CoreTransferable
   }
 
   @objc public func join(_ sessionRef: T.GroupSessionRef) {
-    let session = groupSessions[sessionRef]!
+    let session = try! getSession(sessionRef)
     session.join()
   }
 
@@ -102,7 +113,7 @@ import CoreTransferable
 
   @discardableResult
   @objc public func observeGroupActivitySession(_ listener: @escaping (T.GroupActivityRef, T.GroupSessionRef) -> Void) -> () -> Void {
-    let task = Task<Void, any Error> {
+    let task = Task<Void, any Swift.Error> {
       for await session in T.DynamicGroupActivity.sessions() {
         let activityRef = groupActivities.first(where: { $0.value == session.activity })?.key
           ?? self.register(session.activity)
@@ -183,7 +194,7 @@ import CoreTransferable
     let journalRef = groupSessionJournals.insert(journal, takingIndexFrom: &indexGenerator)
 
     // Automatically subscribe to attachments stream
-    let task = Task<Void, any Error> {
+    let task = Task<Void, any Swift.Error> {
       for await attachments in journal.attachments {
         let attachmentIds = attachments.map { attachment in
           let attachmentId = attachment.id.uuidString
@@ -202,138 +213,58 @@ import CoreTransferable
     _ journalRef: T.GroupSessionJournalRef,
     item: String,
     metadata: String
-  ) async -> String? {
-    guard let journal = groupSessionJournals[journalRef] as? GroupSessionJournal else {
-      print("Failed to get journal for ref:", journalRef)
-      return nil
-    }
-
-    do {
-      let journalItem = item
-      let journalMetadata = metadata
-
-      let attachment = try await Task(priority: .userInitiated) {
-        try await journal.add(journalItem, metadata: journalMetadata)
-      }.value
-      let attachmentId = attachment.id.uuidString
-      journalAttachments[attachmentId] = attachment
-      journalAttachmentsOverrides[attachmentId] = (item: journalItem, metadata: metadata)
-
-      return attachmentId
-    } catch {
-      print("Failed to add journal item: \(error)")
-      return nil
-    }
+  ) async throws -> String? {
+    let journal = try getJournal(journalRef)
+    let journalItem = item
+    let journalMetadata = metadata
+    
+    let attachment = try await Task(priority: .userInitiated) {
+      try await journal.add(journalItem, metadata: journalMetadata)
+    }.value
+    let attachmentId = attachment.id.uuidString
+    journalAttachments[attachmentId] = attachment
+    journalAttachmentsOverrides[attachmentId] = (item: journalItem, metadata: metadata)
+    
+    return attachmentId
   }
 
-  @available(iOS 17.0, *)
-  @objc public func addToJournalWithCompletion(
-    _ journalRef: T.GroupSessionJournalRef,
-    item: String,
-    metadata: String,
-    completionHandler: @escaping (String?) -> Void
-  ) {
-    let task = Task<Void, any Error> {
-      let result = await addToJournal(journalRef, item: item, metadata: metadata)
-
-      // not sure if this MainActor.run is necessary
-      await MainActor.run {
-        completionHandler(result)
-      }
-    }
-    tasks.insert(task)
+  enum Error: Swift.Error {
+    case invalidSessionRef(T.GroupSessionRef)
+    case invalidJournalRef(T.GroupSessionJournalRef)
+    case invalidAttachmentRef(T.GroupSessionJournalAttachmentRef)
   }
 
-  @available(iOS 17.0, *)
   @objc public func removeFromJournal(
     _ journalRef: T.GroupSessionJournalRef,
     attachmentId: String
-  ) async -> Bool {
-    guard let journal = groupSessionJournals[journalRef] as? GroupSessionJournal,
-          let attachment = journalAttachments[attachmentId] else {
-      return false
+  ) async throws -> Void {
+    let journal = try getJournal(journalRef)
+    guard let attachment = journalAttachments[attachmentId] else {
+      throw Error.invalidAttachmentRef(attachmentId)
     }
-
-    do {
-      try await journal.remove(attachment: attachment)
-      journalAttachments.removeValue(forKey: attachmentId)
-      return true
-    } catch {
-      print("Failed to remove journal attachment: \(error)")
-      return false
-    }
+    
+    try await journal.remove(attachment: attachment)
+    journalAttachments.removeValue(forKey: attachmentId)
   }
 
-  @available(iOS 17.0, *)
-  @objc public func removeFromJournalWithCompletion(
-    _ journalRef: T.GroupSessionJournalRef,
-    attachmentId: String,
-    completionHandler: @escaping (Bool) -> Void
-  ) {
-    Task {
-      let result = await removeFromJournal(journalRef, attachmentId: attachmentId)
-      await MainActor.run {
-        completionHandler(result)
-      }
-    }
-  }
-
-  @available(iOS 17.0, *)
-  @objc public func loadJournalAttachment(_ attachmentId: String) async -> String? {
+  @objc public func loadJournalAttachment(_ attachmentId: String) async throws -> String? {
     if let override = journalAttachmentsOverrides[attachmentId] {
       return override.item
     }
-
-    guard let attachment = journalAttachments[attachmentId] else { return nil }
-
-    do {
-      return try await attachment.load(String.self)
-    } catch {
-      print("Failed to load journal attachment: \(error)")
-      return nil
+    guard let attachment = journalAttachments[attachmentId] else {
+      throw Error.invalidAttachmentRef(attachmentId)
     }
+    return try await attachment.load(String.self)
   }
 
-  @available(iOS 17.0, *)
-  @objc public func loadJournalAttachmentWithCompletion(
-    _ attachmentId: String,
-    completionHandler: @escaping (String?) -> Void
-  ) {
-    Task {
-      let result = await loadJournalAttachment(attachmentId)
-      await MainActor.run {
-        completionHandler(result)
-      }
-    }
-  }
-
-  @available(iOS 17.0, *)
-  @objc public func loadJournalAttachmentMetadata(_ attachmentId: String) async -> String? {
+  @objc public func loadJournalAttachmentMetadata(_ attachmentId: String) async throws -> String? {
     if let override = journalAttachmentsOverrides[attachmentId] {
       return override.metadata
     }
-
-    guard let attachment = journalAttachments[attachmentId] else { return nil }
-
-    do {
-      return try await attachment.loadMetadata(of: String.self)
-    } catch {
-      print("Failed to load journal attachment metadata: \(error)")
-      return nil
+    guard let attachment = journalAttachments[attachmentId] else {
+      throw Error.invalidAttachmentRef(attachmentId)
     }
-  }
-
-  @available(iOS 17.0, *)
-  @objc public func loadJournalAttachmentMetadataWithCompletion(
-    _ attachmentId: String,
-    completionHandler: @escaping (String?) -> Void
-  ) {
-    Task {
-      let result = await loadJournalAttachmentMetadata(attachmentId)
-      await MainActor.run {
-        completionHandler(result)
-      }
-    }
+    return try await attachment.loadMetadata(of: String.self)
   }
 
   @discardableResult
