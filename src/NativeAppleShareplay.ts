@@ -2,25 +2,25 @@ import type { TurboModule } from 'react-native';
 import { TurboModuleRegistry } from 'react-native';
 import type { EventEmitter } from 'react-native/Libraries/Types/CodegenTypes';
 
-type GroupMessengerRef = number;
-type GroupSessionRef = number;
-type GroupActivityRef = number;
-type GroupSessionJournalRef = number;
-type GroupSessionJournalAttachmentRef = string; // GroupSessionJournal.Attachment.id in Swift
+export type GroupMessengerRef = number;
+export type GroupSessionRef = number;
+export type GroupActivityRef = number;
+export type GroupSessionJournalRef = number;
+export type GroupSessionJournalAttachmentRef = string; // GroupSessionJournal.Attachment.id in Swift
 
-type GroupSessionJournalItem = string;
-type GroupSessionJournalItemMetadata = string;
+export type GroupSessionJournalItem = string;
+export type GroupSessionJournalItemMetadata = string;
 
-type GroupMessengerParticipants = { type: 'all' };
+export type GroupMessengerParticipants = { type: 'all' };
 
-type GroupMessengerMessage = {
+export type GroupMessengerMessage = {
   data: string;
 };
 
-interface GroupMessengerMessageOutgoing extends GroupMessengerMessage {
+export interface GroupMessengerMessageOutgoing extends GroupMessengerMessage {
   type: 'outgoing';
 }
-interface GroupMessengerMessageIncoming extends GroupMessengerMessage {
+export interface GroupMessengerMessageIncoming extends GroupMessengerMessage {
   type: 'incoming';
 }
 
@@ -30,7 +30,7 @@ export enum GroupSessionStatus {
   waiting = 'waiting',
 }
 
-interface GroupActivity {
+export interface GroupActivity {
   metadata: { title: string };
 }
 
