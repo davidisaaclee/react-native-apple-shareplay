@@ -3,7 +3,81 @@ import GroupActivities
 import Combine
 import CoreTransferable
 
+
 @objc public class AppleSharePlayImpl: NSObject {
+  private actor JournalAttachmentStorage {
+    private var attachments: [String: GroupSessionJournal.Attachment] = [:]
+    private var itemOverrides: [String: String] = [:]
+    private var metadataOverrides: [String: String?] = [:]
+    
+    func setAttachment(_ attachment: GroupSessionJournal.Attachment, for id: String) {
+      attachments[id] = attachment
+    }
+    
+    func setItemOverride(_ item: String, for id: String) {
+      itemOverrides[id] = item
+    }
+    
+    func setMetadataOverride(_ metadata: String?, for id: String) {
+      metadataOverrides[id] = metadata
+    }
+    
+    func getAttachment(for id: String) -> GroupSessionJournal.Attachment? {
+      attachments[id]
+    }
+    
+    func getItemOverride(for id: String) -> String? {
+      itemOverrides[id]
+    }
+    
+    func getMetadataOverride(for id: String) -> String?? {
+      metadataOverrides[id]
+    }
+    
+    func removeAll(for id: String) {
+      attachments.removeValue(forKey: id)
+      itemOverrides.removeValue(forKey: id)
+      metadataOverrides.removeValue(forKey: id)
+    }
+    
+    func setAll(attachment: GroupSessionJournal.Attachment, item: String, metadata: String?, for id: String) {
+      attachments[id] = attachment
+      itemOverrides[id] = item
+      metadataOverrides[id] = .some(metadata)
+    }
+    
+    func getBoth(for id: String) -> (item: String?, attachment: GroupSessionJournal.Attachment?) {
+      (itemOverrides[id], attachments[id])
+    }
+    
+    func getBothMeta(for id: String) -> (metadata: String??, attachment: GroupSessionJournal.Attachment?) {
+      (metadataOverrides[id], attachments[id])
+    }
+    
+    func loadAttachmentItem(for id: T.GroupSessionJournalAttachmentRef) async throws -> String {
+      if let override = itemOverrides[id] {
+        return override
+      }
+      guard let attachment = attachments[id] else {
+        throw Error.invalidAttachmentRef(id)
+      }
+      let item = try await attachment.load(String.self)
+      setItemOverride(item, for: id)
+      return item
+    }
+    
+    func loadAttachmentMetadata(for id: T.GroupSessionJournalAttachmentRef) async throws -> String? {
+      if let override = metadataOverrides[id] {
+        return override
+      }
+      guard let attachment = attachments[id] else {
+        throw Error.invalidAttachmentRef(id)
+      }
+      let item = try await attachment.loadMetadata(of: String.self)
+      setMetadataOverride(item, for: id)
+      return item
+    }
+  }
   /// Types used to transfer data to/from Obj-C
   @objc public class T: NSObject {
     public typealias GroupActivityRef = Int
@@ -47,12 +121,7 @@ import CoreTransferable
   private var groupSessions: [T.GroupSessionRef: GroupSession<T.DynamicGroupActivity>] = [:]
   private var groupMessengerRefToSessionm: [T.GroupMessengerRef: T.GroupSessionRef] = [:]
   private var groupSessionJournals: [T.GroupSessionJournalRef: GroupSessionJournal] = [:]
-  private var journalAttachments: [T.GroupSessionJournalAttachmentRef: GroupSessionJournal.Attachment] = [:]
-  /** Group Activities API fails when attempting to load attachment that this user sent. Store that
-   data here and check it before trying to load any attachment to avoid an unexpected error. */
-  private var journalAttachmentItemOverrides: [T.GroupSessionJournalAttachmentRef: String] = [:]
-  // entry will be nil if checked and no metadata
-  private var journalAttachmentMetadataOverrides: [T.GroupSessionJournalAttachmentRef: String?] = [:]
+  private let journalStorage = JournalAttachmentStorage()
 
   private var tasks: Set<Task<Void, any Swift.Error>> = []
   private var subscriptions: Set<AnyCancellable> = []
@@ -242,10 +311,11 @@ import CoreTransferable
     // Automatically subscribe to attachments stream
     let task = Task<Void, any Swift.Error> {
       for await attachments in journal.attachments {
-        let attachmentIds = attachments.map { attachment in
+        var attachmentIds: [String] = []
+        for attachment in attachments {
           let attachmentId = attachment.id.uuidString
-          self.journalAttachments[attachmentId] = attachment
-          return attachmentId
+          await self.journalStorage.setAttachment(attachment, for: attachmentId)
+          attachmentIds.append(attachmentId)
         }
         self.journalAttachmentsPublisher.send((source: journalRef, attachments: attachmentIds))
       }
@@ -266,9 +336,7 @@ import CoreTransferable
 
     let attachment = try await journal.add(journalItem, metadata: journalMetadata)
     let attachmentId = attachment.id.uuidString
-    journalAttachments[attachmentId] = attachment
-    journalAttachmentItemOverrides[attachmentId] = journalItem
-    journalAttachmentMetadataOverrides[attachmentId] = .some(journalMetadata)
+    await journalStorage.setAll(attachment: attachment, item: journalItem, metadata: journalMetadata, for: attachmentId)
 
     return attachmentId
   }
@@ -285,38 +353,20 @@ import CoreTransferable
     attachmentId: String
   ) async throws -> Void {
     let journal = try getJournal(journalRef)
-    guard let attachment = journalAttachments[attachmentId] else {
+    guard let attachment = await journalStorage.getAttachment(for: attachmentId) else {
       throw Error.invalidAttachmentRef(attachmentId)
     }
 
     try await journal.remove(attachment: attachment)
-    journalAttachments.removeValue(forKey: attachmentId)
-    journalAttachmentItemOverrides.removeValue(forKey: attachmentId)
-    journalAttachmentMetadataOverrides.removeValue(forKey: attachmentId)
+    await journalStorage.removeAll(for: attachmentId)
   }
 
-  @objc public func loadJournalAttachment(_ attachmentId: String) async throws -> String? {
-    if let override = journalAttachmentItemOverrides[attachmentId] {
-      return override
-    }
-    guard let attachment = journalAttachments[attachmentId] else {
-      throw Error.invalidAttachmentRef(attachmentId)
-    }
-    let item = try await attachment.load(String.self)
-    journalAttachmentItemOverrides[attachmentId] = item
-    return item
+  @objc public func loadJournalAttachment(_ attachmentId: String) async throws -> String {
+    return try await journalStorage.loadAttachmentItem(for: attachmentId)
   }
 
   @objc public func loadJournalAttachmentMetadata(_ attachmentId: String) async throws -> String? {
-    if let override = journalAttachmentMetadataOverrides[attachmentId] {
-      return override
-    }
-    guard let attachment = journalAttachments[attachmentId] else {
-      throw Error.invalidAttachmentRef(attachmentId)
-    }
-    let metadata = try await attachment.loadMetadata(of: String.self)
-    journalAttachmentMetadataOverrides[attachmentId] = metadata
-    return metadata
+    return try await journalStorage.loadAttachmentMetadata(for: attachmentId)
   }
 
   @objc public func observeJournalAttachments(
