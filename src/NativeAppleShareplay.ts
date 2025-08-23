@@ -11,18 +11,12 @@ export type GroupSessionJournalAttachmentRef = string; // GroupSessionJournal.At
 export type GroupSessionJournalItem = string;
 export type GroupSessionJournalItemMetadata = string;
 
-export type GroupMessengerParticipants = { type: 'all' };
+export const GroupMessengerParticipantsAll = null;
+export type GroupMessengerParticipants =
+  | typeof GroupMessengerParticipantsAll
+  | Participant[];
 
-export type GroupMessengerMessage = {
-  data: string;
-};
-
-export interface GroupMessengerMessageOutgoing extends GroupMessengerMessage {
-  type: 'outgoing';
-}
-export interface GroupMessengerMessageIncoming extends GroupMessengerMessage {
-  type: 'incoming';
-}
+export type GroupMessengerMessage = string;
 
 export enum GroupSessionStatus {
   invalidated = 'invalidated',
@@ -32,6 +26,10 @@ export enum GroupSessionStatus {
 
 export interface GroupActivity {
   metadata: { title: string };
+}
+
+export interface Participant {
+  id: string;
 }
 
 export interface Spec extends TurboModule {
@@ -58,12 +56,12 @@ export interface Spec extends TurboModule {
   groupMessengerCreate(session: GroupSessionRef): GroupMessengerRef;
   groupMessengerSend(
     messenger: GroupMessengerRef,
-    message: GroupMessengerMessageOutgoing,
+    message: GroupMessengerMessage,
     target: GroupMessengerParticipants
   ): Promise<void>;
   readonly onGroupMessengerMessageReceived: EventEmitter<{
     source: GroupMessengerRef;
-    message: GroupMessengerMessageIncoming;
+    message: GroupMessengerMessage;
   }>;
 
   // Automatically subscribes to attachments stream. There is currently no way
@@ -74,7 +72,7 @@ export interface Spec extends TurboModule {
   groupSessionJournalAdd(
     journalRef: GroupSessionJournalRef,
     item: GroupSessionJournalItem,
-    metadata: GroupSessionJournalItemMetadata
+    metadata?: GroupSessionJournalItemMetadata
   ): Promise<GroupSessionJournalAttachmentRef>;
   groupSessionJournalRemove(
     journalRef: GroupSessionJournalRef,
@@ -90,7 +88,14 @@ export interface Spec extends TurboModule {
   ): Promise<GroupSessionJournalItem>;
   groupSessionJournalAttachmentLoadMetadata(
     attachmentRef: GroupSessionJournalAttachmentRef
-  ): Promise<GroupSessionJournalItemMetadata>;
+  ): Promise<GroupSessionJournalItemMetadata | null>;
+
+  groupSessionLocalParticipant(sessionRef: GroupSessionRef): Participant;
+  groupSessionActiveParticipants(sessionRef: GroupSessionRef): Participant[];
+  readonly onActiveParticipantsChange: EventEmitter<{
+    source: GroupSessionRef;
+    participants: Participant[];
+  }>;
 }
 
 export default TurboModuleRegistry.getEnforcing<Spec>('AppleShareplay');

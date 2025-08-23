@@ -44,10 +44,7 @@ RCT_EXPORT_MODULE()
         observer = [self.impl observeGroupMessengerMessageReceived:^(NSInteger messengerRef, NSData * _Nonnull message) {
           [self emitOnGroupMessengerMessageReceived:@{
             @"source": @(messengerRef),
-            @"message": @{
-              @"type": @"incoming",
-              @"data": [NSString stringWithUTF8String:(char *)[message bytes]],
-            }
+            @"message": [NSString stringWithUTF8String:(char *)[message bytes]],
           }];
         }];
         [self.observers addObject: observer];
@@ -60,11 +57,24 @@ RCT_EXPORT_MODULE()
           });
         }];
         [self.observers addObject: observer];
-        
+
         observer = [self.impl observeJournalAttachments:^(NSInteger journalRef, NSArray<NSString *> * _Nonnull attachments) {
           [self emitOnGroupSessionJournalAttachments:@{
             @"source": @(journalRef),
             @"attachments": attachments
+          }];
+        }];
+        [self.observers addObject: observer];
+
+        observer = [self.impl observeActiveParticipants:^(NSInteger sessionRef, NSArray<NSString *> * _Nonnull activeParticipants) {
+          NSMutableArray *participants = [NSMutableArray arrayWithCapacity:activeParticipants.count];
+          for (NSString *participantId in activeParticipants) {
+            [participants addObject:@{@"id": participantId}];
+          }
+
+          [self emitOnActiveParticipantsChange:@{
+            @"source": @(sessionRef),
+            @"participants": participants
           }];
         }];
         [self.observers addObject: observer];
@@ -93,19 +103,23 @@ RCT_EXPORT_MODULE()
 }
 
 - (void)groupMessengerSend:(double)messenger
-                   message:(JS::NativeAppleShareplay::GroupMessengerMessageOutgoing &)message
-                    target:(JS::NativeAppleShareplay::GroupMessengerParticipants &)target
-                   resolve:(nonnull RCTPromiseResolveBlock)resolve
-                    reject:(nonnull RCTPromiseRejectBlock)reject
+                   message:(NSString *)message
+                    target:(NSDictionary *)target
+                   resolve:(RCTPromiseResolveBlock)resolve
+                    reject:(RCTPromiseRejectBlock)reject
 {
-  NSData *messageData = [message.data() dataUsingEncoding: NSUTF8StringEncoding];
-
-  // TODO: there's only one kind of Participants currently
-  assert([target.type() isEqual:@"all"]);
-  GroupMessengerParticipants *participants = [[GroupMessengerParticipants alloc] init];
-
-  [self.impl send:messageData using:(NSInteger)messenger to:participants completionHandler:^{
-    resolve(nil);
+  NSData *messageData = [message dataUsingEncoding: NSUTF8StringEncoding];
+  GroupMessengerParticipants *participants =
+    target == nil
+    ? [[GroupMessengerParticipantsAll alloc] init]
+    : [[GroupMessengerParticipantsOnly alloc] initWithParticipantIds: [NSSet setWithArray: [target allKeys]]];
+  
+  [self.impl send:messageData using:(NSInteger)messenger to:participants completionHandler:^(NSError * _Nullable error) {
+    if (error) {
+      reject(@"messenger_send_failed", @"Failed to send message", error);
+    } else {
+      resolve(nil);
+    }
   }];
 }
 
@@ -126,10 +140,11 @@ RCT_EXPORT_MODULE()
 }
 
 - (void)groupSessionJournalAdd:(double)journalRef
-                          item:(nonnull NSString *)item
-                      metadata:(nonnull NSString *)metadata
-                       resolve:(nonnull RCTPromiseResolveBlock)resolve
-                        reject:(nonnull RCTPromiseRejectBlock)reject {
+                          item:(NSString *)item
+                      metadata:(NSString *)metadata
+                       resolve:(RCTPromiseResolveBlock)resolve
+                        reject:(RCTPromiseRejectBlock)reject
+{
   [self.impl addToJournal:journalRef item:item metadata:metadata completionHandler:^(NSString * _Nullable attachmentId, NSError * _Nullable error) {
     if (error) {
       reject(@"journal_add_failed", @"Failed to add item to journal", error);
@@ -179,6 +194,30 @@ RCT_EXPORT_MODULE()
     }
   }];
 }
+
+- (nonnull NSArray<NSDictionary *> *)groupSessionActiveParticipants:(double)sessionRef {
+  NSError *error;
+  NSArray *participantIds = [self.impl activeParticipantsIn:(NSInteger)sessionRef error:&error];
+  if (error) {
+    throw error;
+  }
+  NSMutableArray *result = [NSMutableArray arrayWithCapacity:participantIds.count];
+  for (NSString *participantId in participantIds) {
+    [result addObject:@{@"id": participantId}];
+  }
+  return result;
+}
+
+
+- (nonnull NSDictionary *)groupSessionLocalParticipant:(double)sessionRef {
+  NSError *error;
+  NSString *localParticipantId = [self.impl localParticipantIn:(NSInteger)sessionRef error:&error];
+  if (error) {
+    throw error;
+  }
+  return @{@"id": localParticipantId};
+}
+
 
 
 @end

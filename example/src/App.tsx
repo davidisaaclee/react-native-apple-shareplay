@@ -6,7 +6,9 @@
  */
 
 import AppleSharePlay, {
+  GroupMessengerParticipantsAll,
   GroupSessionStatus,
+  type Participant,
 } from 'react-native-apple-shareplay';
 import React, { useEffect, useState } from 'react';
 import { Appearance, Button, SafeAreaView, Text } from 'react-native';
@@ -26,6 +28,12 @@ function App(): React.JSX.Element {
     Record<number, GroupSessionStatus>
   >({});
   const [messengerRef, setMessengerRef] = useState<number | null>(null);
+  const [localParticipant, setLocalParticipant] = useState<Participant | null>(
+    null
+  );
+  const [activeParticipants, setActiveParticipants] = useState<Participant[]>(
+    []
+  );
 
   useEffect(() => {
     const subscriptions: EventSubscription[] = [];
@@ -65,18 +73,36 @@ function App(): React.JSX.Element {
         for (const attachment of opts.attachments) {
           console.log(`Attachment: ${attachment}:`);
           console.log(
+            'Attachment item:',
             await AppleSharePlay.groupSessionJournalAttachmentLoad(attachment)
           );
           console.log(
+            'Attachment metadata:',
             await AppleSharePlay.groupSessionJournalAttachmentLoadMetadata(
               attachment
             )
           );
         }
+      }),
+
+      AppleSharePlay.onActiveParticipantsChange((opts) => {
+        console.log('Active participants changed:', opts);
+        setActiveParticipants(opts.participants);
+        // Also update local participant when participants change
+        if (opts.source && sessionRef === opts.source) {
+          try {
+            const local = AppleSharePlay.groupSessionLocalParticipant(
+              opts.source
+            );
+            setLocalParticipant(local);
+          } catch (err) {
+            console.error('Failed to get local participant:', err);
+          }
+        }
       })
     );
     return () => subscriptions.forEach((x) => x.remove());
-  }, []);
+  }, [sessionRef]);
 
   const [journalRef, setJournalRef] = useState<number | null>(null);
 
@@ -91,6 +117,16 @@ function App(): React.JSX.Element {
     // the journal *before* joining the session.
     setJournalRef(AppleSharePlay.groupSessionJournalCreate(sessionRef));
     AppleSharePlay.groupSessionJoin(sessionRef);
+
+    // Get initial participant information
+    try {
+      const local = AppleSharePlay.groupSessionLocalParticipant(sessionRef);
+      const active = AppleSharePlay.groupSessionActiveParticipants(sessionRef);
+      setLocalParticipant(local);
+      setActiveParticipants(active);
+    } catch (err) {
+      console.error('Failed to get participant information:', err);
+    }
   }, [sessionRef]);
 
   const textColor = Appearance.getColorScheme() === 'dark' ? 'white' : 'black';
@@ -108,11 +144,25 @@ function App(): React.JSX.Element {
         Messenger reference:{' '}
         {messengerRef == null ? 'None' : messengerRef.toString()}
       </Text>
+      <Text style={{ color: textColor }}>
+        Local participant: {localParticipant?.id ?? 'None'}
+      </Text>
+      <Text style={{ color: textColor }}>
+        Active participants: {activeParticipants.length} (
+        {activeParticipants.map((p) => p.id).join(', ')})
+      </Text>
       {Object.entries(sessionState).map(([ref, status]) => (
         <Text key={ref} style={{ color: textColor }}>
           Session {ref} status: {status}
         </Text>
       ))}
+
+      <Button
+        title="Check eligibility"
+        onPress={() => {
+          console.log('Eligible:', AppleSharePlay.getGroupSharingEligbility());
+        }}
+      />
 
       <Button
         title="Activate Group Activity"
@@ -155,8 +205,8 @@ function App(): React.JSX.Element {
           try {
             await AppleSharePlay.groupMessengerSend(
               messengerRef!,
-              { type: 'outgoing', data: 'Hello from the group activity!' },
-              { type: 'all' }
+              'Hello from the group activity!',
+              GroupMessengerParticipantsAll
             );
             console.log('Sent message');
           } catch (err) {
@@ -173,8 +223,8 @@ function App(): React.JSX.Element {
             console.log('Sending journal attachment...');
             const attachmentRef = await AppleSharePlay.groupSessionJournalAdd(
               journalRef!,
-              `journal item ${nextCounter()}`,
-              `journal metadata ${nextCounter()}`
+              `journal item ${nextCounter()}`
+              // `journal metadata ${nextCounter()}`
             );
             console.log('Journal attachment created:', attachmentRef);
             console.log(

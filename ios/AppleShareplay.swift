@@ -28,6 +28,14 @@ import CoreTransferable
     }
 
     @objc public class GroupMessengerParticipants: NSObject {}
+    @objc public class GroupMessengerParticipantsAll: GroupMessengerParticipants {}
+    @objc public class GroupMessengerParticipantsOnly: GroupMessengerParticipants {
+      @objc public init(participantIds: Set<UUID>) {
+        self.participantIds = participantIds
+      }
+      
+      var participantIds: Set<UUID>
+    }
    }
 
   private var indexGenerator = stride(from: 0, through: Int.max, by: 1).makeIterator()
@@ -37,6 +45,7 @@ import CoreTransferable
   private var groupActivities: [T.GroupActivityRef: T.DynamicGroupActivity] = [:]
   private var groupMessengers: [T.GroupMessengerRef: GroupSessionMessenger] = [:]
   private var groupSessions: [T.GroupSessionRef: GroupSession<T.DynamicGroupActivity>] = [:]
+  private var groupMessengerRefToSessionm: [T.GroupMessengerRef: T.GroupSessionRef] = [:]
   private var groupSessionJournals: [T.GroupSessionJournalRef: GroupSessionJournal] = [:]
   private var journalAttachments: [T.GroupSessionJournalAttachmentRef: GroupSessionJournal.Attachment] = [:]
   /** Group Activities API fails when attempting to load attachment that this user sent. Store that
@@ -57,22 +66,34 @@ import CoreTransferable
   /** When a session's state changes, publishes the ref for the affected session */
   let sessionStatePublisher = PassthroughSubject<T.GroupSessionRef, Never>()
 
+  /** When a session's active participants changes, publishes the ref for the affected session */
+  let sessionActiveParticipantsPublisher = PassthroughSubject<T.GroupSessionRef, Never>()
+
   /** When journal attachments change, publishes the journal ref and attachment IDs */
   let journalAttachmentsPublisher = PassthroughSubject<(source: T.GroupSessionJournalRef, attachments: [String]), Never>()
-  
+
   private func getSession(_ ref: T.GroupSessionRef) throws -> GroupSession<T.DynamicGroupActivity> {
     guard let session = groupSessions[ref] else { throw Error.invalidSessionRef(ref) }
     return session
   }
-  
+
   private func getJournal(_ ref: T.GroupSessionJournalRef) throws -> GroupSessionJournal {
     guard let session = groupSessionJournals[ref] else { throw Error.invalidJournalRef(ref) }
     return session
   }
-  
-  @discardableResult
+
+  private func getMessenger(_ ref: T.GroupMessengerRef) throws -> GroupSessionMessenger {
+    guard let m = groupMessengers[ref] else { throw Error.invalidMessengerRef(ref) }
+    return m
+  }
+
   @objc public func observeGroupSharingEligbility(_ listener: @escaping (Bool) -> Void) -> () -> Void {
-    let cancellable = groupSharingEligibilityPublisher.sink(receiveValue: listener)
+    groupSharingEligibilityPublisher.sink {
+      print("Eligibility change", $0)
+    }
+    
+    let cancellable = groupSharingEligibilityPublisher
+      .sink(receiveValue: listener)
     return { cancellable.cancel() }
   }
 
@@ -100,6 +121,13 @@ import CoreTransferable
           self?.sessionStatePublisher.send(sessionRef)
         }
     )
+    
+    subscriptions.insert(
+      session.$activeParticipants
+        .sink { [weak self] _ in
+          self?.sessionActiveParticipantsPublisher.send(sessionRef)
+        }
+    )
     return sessionRef
   }
 
@@ -113,7 +141,6 @@ import CoreTransferable
     session.leave()
   }
 
-  @discardableResult
   @objc public func observeGroupActivitySession(_ listener: @escaping (T.GroupActivityRef, T.GroupSessionRef) -> Void) -> () -> Void {
     let task = Task<Void, any Swift.Error> {
       for await session in T.DynamicGroupActivity.sessions() {
@@ -135,6 +162,7 @@ import CoreTransferable
     let session = groupSessions[sessionRef]!
     let messenger = GroupSessionMessenger(session: session)
     let messengerRef = groupMessengers.insert(messenger, takingIndexFrom: &indexGenerator)
+    groupMessengerRefToSessionm[messengerRef] = sessionRef
 
     tasks.insert(
       Task {
@@ -152,16 +180,12 @@ import CoreTransferable
     _ message: T.GroupMessengerMessage,
     using messengerRef: T.GroupMessengerRef,
     to target: T.GroupMessengerParticipants
-  ) async {
-    do {
-      let messenger = groupMessengers[messengerRef]!
-      try await messenger.send(message, to: Participants(target))
-    } catch {
-      print("Failed send message", error)
-    }
+  ) async throws {
+    let messenger = try getMessenger(messengerRef)
+    let session = try getSession(groupMessengerRefToSessionm[messengerRef]!)
+    try await messenger.send(message, to: Participants(target, session: session))
   }
 
-  @discardableResult
   @objc public func observeGroupMessengerMessageReceived(
     _ listener: @escaping (T.GroupMessengerRef, T.GroupMessengerMessage) -> Void
   ) -> () -> Void {
@@ -180,11 +204,31 @@ import CoreTransferable
     }
   }
 
-  @discardableResult
   @objc public func observeGroupSessionStatus(
     _ listener: @escaping (T.GroupSessionRef) -> Void
   ) -> () -> Void {
     let cancellable = self.sessionStatePublisher.sink(receiveValue: listener)
+    return { cancellable.cancel() }
+  }
+
+  @objc public func localParticipant(in sessionRef: T.GroupSessionRef) throws -> String {
+    return (try getSession(sessionRef)).localParticipant.id.uuidString
+  }
+
+  @objc public func activeParticipants(in sessionRef: T.GroupSessionRef) throws -> [String] {
+    return (try getSession(sessionRef)).activeParticipants.map { $0.id.uuidString }
+  }
+
+  @objc public func observeActiveParticipants(
+    _ listener: @escaping (T.GroupSessionRef, /* Participant.id */ [String]) -> Void
+  ) -> () -> Void {
+    let cancellable = self.sessionActiveParticipantsPublisher
+      .receive(on: DispatchQueue.main)
+      .sink { [weak self] sessionRef in
+        guard let self else { return }
+        let session = try! self.getSession(sessionRef)
+        listener(sessionRef, session.activeParticipants.map { $0.id.uuidString })
+      }
     return { cancellable.cancel() }
   }
 
@@ -214,19 +258,19 @@ import CoreTransferable
   @objc public func addToJournal(
     _ journalRef: T.GroupSessionJournalRef,
     item: String,
-    metadata: String
+    metadata: String?
   ) async throws -> String? {
     let journal = try getJournal(journalRef)
     let journalItem = item
     let journalMetadata = metadata
-    
+
     let attachment = try await Task(priority: .userInitiated) {
       try await journal.add(journalItem, metadata: journalMetadata)
     }.value
     let attachmentId = attachment.id.uuidString
     journalAttachments[attachmentId] = attachment
     journalAttachmentItemOverrides[attachmentId] = journalItem
-    journalAttachmentMetadataOverrides[attachmentId] = journalMetadata
+    journalAttachmentMetadataOverrides[attachmentId] = .some(journalMetadata)
 
     return attachmentId
   }
@@ -235,6 +279,7 @@ import CoreTransferable
     case invalidSessionRef(T.GroupSessionRef)
     case invalidJournalRef(T.GroupSessionJournalRef)
     case invalidAttachmentRef(T.GroupSessionJournalAttachmentRef)
+    case invalidMessengerRef(T.GroupMessengerRef)
   }
 
   @objc public func removeFromJournal(
@@ -245,7 +290,7 @@ import CoreTransferable
     guard let attachment = journalAttachments[attachmentId] else {
       throw Error.invalidAttachmentRef(attachmentId)
     }
-    
+
     try await journal.remove(attachment: attachment)
     journalAttachments.removeValue(forKey: attachmentId)
     journalAttachmentItemOverrides.removeValue(forKey: attachmentId)
@@ -276,7 +321,6 @@ import CoreTransferable
     return metadata
   }
 
-  @discardableResult
   @objc public func observeJournalAttachments(
     _ listener: @escaping (T.GroupSessionJournalRef, [String]) -> Void
   ) -> () -> Void {
@@ -299,7 +343,14 @@ private extension Dictionary {
 }
 
 private extension Participants {
-  init(_ x: AppleSharePlayImpl.T.GroupMessengerParticipants) {
-    self = .all
+  init<ActivityType>(_ x: AppleSharePlayImpl.T.GroupMessengerParticipants, session: GroupSession<ActivityType>) {
+    if x is AppleSharePlayImpl.T.GroupMessengerParticipantsAll {
+      self = .all
+    } else if let y = x as? AppleSharePlayImpl.T.GroupMessengerParticipantsOnly  {
+      let participants = session.activeParticipants.filter { y.participantIds.contains($0.id) }
+      self = .only(participants)
+    } else {
+      fatalError("Unrecognized Participants shape")
+    }
   }
 }
