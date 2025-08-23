@@ -72,7 +72,7 @@ export interface Spec extends TurboModule {
   groupSessionJournalAdd(
     journalRef: GroupSessionJournalRef,
     item: GroupSessionJournalItem,
-    metadata?: GroupSessionJournalItemMetadata
+    metadata: GroupSessionJournalItemMetadata | null
   ): Promise<GroupSessionJournalAttachmentRef>;
   groupSessionJournalRemove(
     journalRef: GroupSessionJournalRef,

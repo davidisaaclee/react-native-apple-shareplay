@@ -264,9 +264,7 @@ import CoreTransferable
     let journalItem = item
     let journalMetadata = metadata
 
-    let attachment = try await Task(priority: .userInitiated) {
-      try await journal.add(journalItem, metadata: journalMetadata)
-    }.value
+    let attachment = try await journal.add(journalItem, metadata: journalMetadata)
     let attachmentId = attachment.id.uuidString
     journalAttachments[attachmentId] = attachment
     journalAttachmentItemOverrides[attachmentId] = journalItem

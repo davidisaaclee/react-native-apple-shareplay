@@ -223,8 +223,8 @@ function App(): React.JSX.Element {
             console.log('Sending journal attachment...');
             const attachmentRef = await AppleSharePlay.groupSessionJournalAdd(
               journalRef!,
-              `journal item ${nextCounter()}`
-              // `journal metadata ${nextCounter()}`
+              `journal item ${nextCounter()}`,
+              null
             );
             console.log('Journal attachment created:', attachmentRef);
             console.log(

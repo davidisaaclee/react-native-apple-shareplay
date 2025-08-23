@@ -145,7 +145,7 @@ RCT_EXPORT_MODULE()
                        resolve:(RCTPromiseResolveBlock)resolve
                         reject:(RCTPromiseRejectBlock)reject
 {
-  [self.impl addToJournal:journalRef item:item metadata:metadata completionHandler:^(NSString * _Nullable attachmentId, NSError * _Nullable error) {
+  [self.impl addToJournal:(NSInteger)journalRef item:item metadata:metadata completionHandler:^(NSString * _Nullable attachmentId, NSError * _Nullable error) {
     if (error) {
       reject(@"journal_add_failed", @"Failed to add item to journal", error);
     } else {
