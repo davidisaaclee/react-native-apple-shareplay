@@ -41,10 +41,11 @@ RCT_EXPORT_MODULE()
         }];
         [self.observers addObject: observer];
 
-        observer = [self.impl observeGroupMessengerMessageReceived:^(NSInteger messengerRef, NSData * _Nonnull message) {
+        observer = [self.impl observeGroupMessengerMessageReceived:^(NSInteger messengerRef, NSData * _Nonnull message, NSString * _Nonnull senderId) {
           [self emitOnGroupMessengerMessageReceived:@{
             @"source": @(messengerRef),
             @"message": [NSString stringWithUTF8String:(char *)[message bytes]],
+            @"sender": @{"id": senderId},
           }];
         }];
         [self.observers addObject: observer];

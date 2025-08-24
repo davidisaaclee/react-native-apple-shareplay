@@ -62,6 +62,7 @@ export interface Spec extends TurboModule {
   readonly onGroupMessengerMessageReceived: EventEmitter<{
     source: GroupMessengerRef;
     message: GroupMessengerMessage;
+    sender: Participant;
   }>;
 
   // Automatically subscribes to attachments stream. There is currently no way

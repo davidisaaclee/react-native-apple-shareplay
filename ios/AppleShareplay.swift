@@ -130,7 +130,7 @@ import CoreTransferable
     groupStateObserver.$isEligibleForGroupSession.eraseToAnyPublisher()
   }
 
-  let messageReceivedPublisher = PassthroughSubject<(source: T.GroupMessengerRef, message: T.GroupMessengerMessage), Never>()
+  let messageReceivedPublisher = PassthroughSubject<(source: T.GroupMessengerRef, message: T.GroupMessengerMessage, senderId: String), Never>()
 
   /** When a session's state changes, publishes the ref for the affected session */
   let sessionStatePublisher = PassthroughSubject<T.GroupSessionRef, Never>()
@@ -236,8 +236,8 @@ import CoreTransferable
     tasks.insert(
       Task {
         let messages = messenger.messages(of: T.GroupMessengerMessage.self)
-        for await (message, _) in messages {
-          messageReceivedPublisher.send((source: messengerRef, message: message))
+        for await (message, info) in messages {
+          messageReceivedPublisher.send((source: messengerRef, message: message, senderId: info.source.id.uuidString))
         }
       }
     )
@@ -256,7 +256,7 @@ import CoreTransferable
   }
 
   @objc public func observeGroupMessengerMessageReceived(
-    _ listener: @escaping (T.GroupMessengerRef, T.GroupMessengerMessage) -> Void
+    _ listener: @escaping (T.GroupMessengerRef, T.GroupMessengerMessage, /* Sender ID */ String) -> Void
   ) -> () -> Void {
     let cancellable = self.messageReceivedPublisher.sink(receiveValue: listener)
     return { cancellable.cancel() }
