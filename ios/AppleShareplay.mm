@@ -45,7 +45,7 @@ RCT_EXPORT_MODULE()
           [self emitOnGroupMessengerMessageReceived:@{
             @"source": @(messengerRef),
             @"message": [NSString stringWithUTF8String:(char *)[message bytes]],
-            @"sender": @{"id": senderId},
+            @"sender": @{@"id": senderId},
           }];
         }];
         [self.observers addObject: observer];
