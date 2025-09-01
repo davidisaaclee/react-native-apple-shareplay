@@ -219,6 +219,4 @@ RCT_EXPORT_MODULE()
   return @{@"id": localParticipantId};
 }
 
-
-
 @end
