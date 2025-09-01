@@ -1,4 +1,9 @@
 {
   "name": "AppleShareplayExample",
-  "displayName": "AppleShareplayExample"
+  "displayName": "AppleShareplayExample",
+  "ios": {
+    "entitlements": {
+      "com.apple.developer.group-session": true
+    }
+  }
 }
