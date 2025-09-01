@@ -11,11 +11,6 @@ export type GroupSessionJournalAttachmentRef = string; // GroupSessionJournal.At
 export type GroupSessionJournalItem = string;
 export type GroupSessionJournalItemMetadata = string;
 
-export const GroupMessengerParticipantsAll = null;
-export type GroupMessengerParticipants =
-  | typeof GroupMessengerParticipantsAll
-  | Participant[];
-
 export type GroupMessengerMessage = string;
 
 export enum GroupSessionStatus {
@@ -57,7 +52,8 @@ export interface Spec extends TurboModule {
   groupMessengerSend(
     messenger: GroupMessengerRef,
     message: GroupMessengerMessage,
-    target: GroupMessengerParticipants
+    /** If `target` is omitted, message is broadcast to all participants. */
+    target?: Participant[]
   ): Promise<void>;
   readonly onGroupMessengerMessageReceived: EventEmitter<{
     source: GroupMessengerRef;

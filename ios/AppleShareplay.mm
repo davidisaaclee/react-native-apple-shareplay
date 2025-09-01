@@ -103,17 +103,27 @@ RCT_EXPORT_MODULE()
   return [NSNumber numberWithLong:[self.impl createMessengerOn:(NSInteger)session]];
 }
 
+- (GroupMessengerParticipants *)participantsFrom:(NSArray *)target
+{
+  if (target == nil) {
+    return [[GroupMessengerParticipantsAll alloc] init];
+  }
+  
+  NSMutableSet *participantIds = [[NSMutableSet alloc] init];
+  for (NSString *participantId in participantIds) {
+    [participantIds addObject:@{@"id": participantId}];
+  }
+  return [[GroupMessengerParticipantsOnly alloc] initWithParticipantIds:participantIds];
+}
+
 - (void)groupMessengerSend:(double)messenger
                    message:(NSString *)message
-                    target:(NSDictionary *)target
+                    target:(NSArray *)target
                    resolve:(RCTPromiseResolveBlock)resolve
                     reject:(RCTPromiseRejectBlock)reject
 {
   NSData *messageData = [message dataUsingEncoding: NSUTF8StringEncoding];
-  GroupMessengerParticipants *participants =
-    target == nil
-    ? [[GroupMessengerParticipantsAll alloc] init]
-    : [[GroupMessengerParticipantsOnly alloc] initWithParticipantIds: [NSSet setWithArray: [target allKeys]]];
+  GroupMessengerParticipants *participants = [self participantsFrom:target];
   
   [self.impl send:messageData using:(NSInteger)messenger to:participants completionHandler:^(NSError * _Nullable error) {
     if (error) {
