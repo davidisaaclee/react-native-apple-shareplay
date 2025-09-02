@@ -157,10 +157,6 @@ import CoreTransferable
   }
 
   @objc public func observeGroupSharingEligbility(_ listener: @escaping (Bool) -> Void) -> () -> Void {
-    groupSharingEligibilityPublisher.sink {
-      print("Eligibility change", $0)
-    }
-    
     let cancellable = groupSharingEligibilityPublisher
       .sink(receiveValue: listener)
     return { cancellable.cancel() }
