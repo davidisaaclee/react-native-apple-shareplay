@@ -101,6 +101,16 @@ function App(): React.JSX.Element {
         }
       })
     );
+
+    // Without this set, we're not guaranteed that we have the correct initial
+    // eligibility state.
+    // - On launch (i.e. the arg to `useState` above),
+    //   `getGroupSharingEligbility` will often return false even if we're in a
+    //   FaceTime call and otherwise eligible.
+    // - We don't get an immediate event when attaching callbacks, so we need
+    //   to manually pull the value.
+    setEligible(AppleSharePlay.getGroupSharingEligbility());
+
     return () => subscriptions.forEach((x) => x.remove());
   }, [sessionRef]);
 
