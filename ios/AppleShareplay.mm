@@ -5,6 +5,7 @@
 @interface AppleShareplay()
 @property (strong, nonatomic) AppleSharePlayImpl *impl;
 @property (strong, nonatomic) NSMutableArray *observers;
+@property (nonatomic) BOOL needsRegisterObservers;
 @end
 
 @implementation AppleShareplay
@@ -17,71 +18,79 @@ RCT_EXPORT_MODULE()
 }
 
 -(id)init {
-    if (self = [super init]) {
-      self.impl = [[AppleSharePlayImpl alloc] init];
-      self.observers = [[NSMutableArray alloc] init];
-
-      // Calling `emitOnGroupSharingEligbilityChange` during init causes a bad_function_call error.
-      // Avoid by delaying subscription a bit.
-      dispatch_queue_t backgroundQueue = dispatch_get_global_queue(QOS_CLASS_BACKGROUND, 0);
-      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)), backgroundQueue, ^{
-        id observer;
-        observer = [self.impl observeGroupSharingEligbility:^(BOOL success) {
-          [self emitOnGroupSharingEligbilityChange:@{@"eligible": @(success)}];
-        }];
-        [self.observers addObject: observer];
-
-        observer = [self.impl observeGroupActivitySession:^(NSInteger activityRef, NSInteger sessionRef) {
-          dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)), backgroundQueue, ^{
-            [self emitOnGroupActivitySession:@{
-              @"source": @(activityRef),
-              @"session": @(sessionRef)
-            }];
-          });
-        }];
-        [self.observers addObject: observer];
-
-        observer = [self.impl observeGroupMessengerMessageReceived:^(NSInteger messengerRef, NSData * _Nonnull message, NSString * _Nonnull senderId) {
-          [self emitOnGroupMessengerMessageReceived:@{
-            @"source": @(messengerRef),
-            @"message": [NSString stringWithUTF8String:(char *)[message bytes]],
-            @"sender": @{@"id": senderId},
-          }];
-        }];
-        [self.observers addObject: observer];
-
-        observer = [self.impl observeGroupSessionStatus:^(NSInteger sessionRef) {
-          dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)), backgroundQueue, ^{
-                                [self emitOnGroupSessionStatusChanged:@{
-                                  @"source": @(sessionRef)
-                                }];
-          });
-        }];
-        [self.observers addObject: observer];
-
-        observer = [self.impl observeJournalAttachments:^(NSInteger journalRef, NSArray<NSString *> * _Nonnull attachments) {
-          [self emitOnGroupSessionJournalAttachments:@{
-            @"source": @(journalRef),
-            @"attachments": attachments
-          }];
-        }];
-        [self.observers addObject: observer];
-
-        observer = [self.impl observeActiveParticipants:^(NSInteger sessionRef, NSArray<NSString *> * _Nonnull activeParticipants) {
-          NSMutableArray *participants = [NSMutableArray arrayWithCapacity:activeParticipants.count];
-          for (NSString *participantId in activeParticipants) {
-            [participants addObject:@{@"id": participantId}];
-          }
-
-          [self emitOnActiveParticipantsChange:@{
-            @"source": @(sessionRef),
-            @"participants": participants
-          }];
-        }];
-        [self.observers addObject: observer];
-      });
-    }
+  if (self = [super init]) {
+    self.impl = [[AppleSharePlayImpl alloc] init];
+    self.observers = [[NSMutableArray alloc] init];
+    self.needsRegisterObservers = YES;
+  }
     return self;
+}
+
+- (void)setEventEmitterCallback:(EventEmitterCallbackWrapper *)eventEmitterCallbackWrapper
+{
+  [super setEventEmitterCallback:eventEmitterCallbackWrapper];
+  // Now that we're guaranteed event emitter setup, register observers (which may fire on attach).
+  [self registerObserversIfNeeded];
+}
+
+- (void)registerObserversIfNeeded
+{
+  if (!self.needsRegisterObservers) {
+    return;
+  }
+  
+  id observer;
+  observer = [self.impl observeGroupSharingEligbility:^(BOOL success) {
+    [self emitOnGroupSharingEligbilityChange:@{@"eligible": @(success)}];
+  }];
+  [self.observers addObject: observer];
+  
+  observer = [self.impl observeGroupActivitySession:^(NSInteger activityRef, NSInteger sessionRef) {
+    [self emitOnGroupActivitySession:@{
+      @"source": @(activityRef),
+      @"session": @(sessionRef)
+    }];
+  }];
+  [self.observers addObject: observer];
+  
+  observer = [self.impl observeGroupMessengerMessageReceived:^(NSInteger messengerRef, NSData * _Nonnull message, NSString * _Nonnull senderId) {
+    [self emitOnGroupMessengerMessageReceived:@{
+      @"source": @(messengerRef),
+      @"message": [NSString stringWithUTF8String:(char *)[message bytes]],
+      @"sender": @{@"id": senderId},
+    }];
+  }];
+  [self.observers addObject: observer];
+  
+  observer = [self.impl observeGroupSessionStatus:^(NSInteger sessionRef) {
+    [self emitOnGroupSessionStatusChanged:@{
+      @"source": @(sessionRef)
+    }];
+  }];
+  [self.observers addObject: observer];
+  
+  observer = [self.impl observeJournalAttachments:^(NSInteger journalRef, NSArray<NSString *> * _Nonnull attachments) {
+    [self emitOnGroupSessionJournalAttachments:@{
+      @"source": @(journalRef),
+      @"attachments": attachments
+    }];
+  }];
+  [self.observers addObject: observer];
+  
+  observer = [self.impl observeActiveParticipants:^(NSInteger sessionRef, NSArray<NSString *> * _Nonnull activeParticipants) {
+    NSMutableArray *participants = [NSMutableArray arrayWithCapacity:activeParticipants.count];
+    for (NSString *participantId in activeParticipants) {
+      [participants addObject:@{@"id": participantId}];
+    }
+    
+    [self emitOnActiveParticipantsChange:@{
+      @"source": @(sessionRef),
+      @"participants": participants
+    }];
+  }];
+  [self.observers addObject: observer];
+  
+  self.needsRegisterObservers = NO;
 }
 
 - (nonnull NSNumber *)getGroupSharingEligbility {
