@@ -6,8 +6,8 @@
  */
 
 import AppleSharePlay, {
-  GroupMessengerParticipantsAll,
   GroupSessionStatus,
+  type GroupSessionRef,
   type Participant,
 } from 'react-native-apple-shareplay';
 import React, { useEffect, useState } from 'react';
@@ -37,6 +37,17 @@ function App(): React.JSX.Element {
 
   useEffect(() => {
     const subscriptions: EventSubscription[] = [];
+
+    const insertSession = (session: GroupSessionRef) => {
+      setSessionRef(session);
+      setSessionState((prev) => ({
+        ...prev,
+        [session]: AppleSharePlay.groupSessionStatus(session),
+      }));
+    };
+
+    AppleSharePlay.listActiveGroupSessions().forEach(insertSession);
+
     subscriptions.push(
       AppleSharePlay.onGroupSharingEligbilityChange((opts) => {
         console.log('Eligibility changed:', opts);
@@ -45,11 +56,7 @@ function App(): React.JSX.Element {
 
       AppleSharePlay.onGroupActivitySession(async (opts) => {
         console.log('Group activity session started:', opts);
-        setSessionRef(opts.session);
-        setSessionState((prev) => ({
-          ...prev,
-          [opts.session]: AppleSharePlay.groupSessionStatus(opts.session),
-        }));
+        insertSession(opts.session);
       }),
 
       AppleSharePlay.onGroupMessengerMessageReceived((opts) => {
@@ -209,6 +216,14 @@ function App(): React.JSX.Element {
       />
 
       <Button
+        title="Discover existing sessions"
+        onPress={() => {
+          const sessions = AppleSharePlay.listActiveGroupSessions();
+          console.log('Discovered sessions:', sessions);
+        }}
+      />
+
+      <Button
         title="Send message"
         disabled={messengerRef == null}
         onPress={async () => {
@@ -216,7 +231,7 @@ function App(): React.JSX.Element {
             await AppleSharePlay.groupMessengerSend(
               messengerRef!,
               'Hello from the group activity!',
-              GroupMessengerParticipantsAll
+              undefined
             );
             console.log('Sent message');
           } catch (err) {

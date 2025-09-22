@@ -36,6 +36,7 @@ export interface Spec extends TurboModule {
     activity: GroupActivityRef
   ): Promise<{ succeeded: boolean }>;
 
+  listActiveGroupSessions(): GroupSessionRef[];
   readonly onGroupActivitySession: EventEmitter<{
     source: GroupActivityRef;
     session: GroupSessionRef;

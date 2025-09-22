@@ -108,6 +108,11 @@ RCT_EXPORT_MODULE()
   return [NSNumber numberWithLong:[self.impl register:activity]];
 }
 
+- (NSArray<NSNumber *> *)listActiveGroupSessions
+{
+  return [self.impl listActiveGroupSessions];
+}
+
 - (nonnull NSNumber *)groupMessengerCreate:(double)session {
   return [NSNumber numberWithLong:[self.impl createMessengerOn:(NSInteger)session]];
 }

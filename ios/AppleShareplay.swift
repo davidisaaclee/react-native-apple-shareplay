@@ -177,6 +177,19 @@ import CoreTransferable
   func activate(_ groupActivity: T.DynamicGroupActivity) async -> Bool {
     try! await groupActivity.activate()
   }
+  
+  @objc public func listActiveGroupSessions() -> [T.GroupSessionRef] {
+    Array(
+      self.groupSessions
+        .filter {
+          if case .invalidated = $0.value.state {
+            return false
+          }
+          return true
+        }
+        .map { $0.key }
+    )
+  }
 
   private func register(_ session: GroupSession<T.DynamicGroupActivity>) -> T.GroupSessionRef {
     let sessionRef = groupSessions.insert(session, takingIndexFrom: &indexGenerator)
