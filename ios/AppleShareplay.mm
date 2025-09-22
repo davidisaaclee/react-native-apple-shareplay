@@ -99,7 +99,7 @@ RCT_EXPORT_MODULE()
 
 - (void)groupActivityActivate:(double)activity resolve:(nonnull RCTPromiseResolveBlock)resolve reject:(nonnull RCTPromiseRejectBlock)reject {
   [self.impl activate:(NSInteger)activity completionHandler: ^(BOOL success) {
-    resolve(@(success));
+    resolve(@{@"succeeded": @(success)});
   }];
 }
 
