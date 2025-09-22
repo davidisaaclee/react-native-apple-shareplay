@@ -28,13 +28,6 @@ export interface Participant {
 }
 
 export interface Spec extends TurboModule {
-  groupSessionJoin(sessionRef: GroupSessionRef): void;
-  groupSessionLeave(sessionRef: GroupSessionRef): void;
-  groupSessionStatus(sessionRef: GroupSessionRef): GroupSessionStatus;
-  readonly onGroupSessionStatusChanged: EventEmitter<{
-    source: GroupSessionRef;
-  }>;
-
   getGroupSharingEligbility(): boolean;
   readonly onGroupSharingEligbilityChange: EventEmitter<{ eligible: boolean }>;
 
@@ -46,6 +39,13 @@ export interface Spec extends TurboModule {
   readonly onGroupActivitySession: EventEmitter<{
     source: GroupActivityRef;
     session: GroupSessionRef;
+  }>;
+
+  groupSessionJoin(sessionRef: GroupSessionRef): void;
+  groupSessionLeave(sessionRef: GroupSessionRef): void;
+  groupSessionStatus(sessionRef: GroupSessionRef): GroupSessionStatus;
+  readonly onGroupSessionStatusChanged: EventEmitter<{
+    source: GroupSessionRef;
   }>;
 
   groupMessengerCreate(session: GroupSessionRef): GroupMessengerRef;
