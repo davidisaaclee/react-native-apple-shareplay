@@ -99,6 +99,16 @@ import CoreTransferable
       }
 
       public var metadata: GroupActivityMetadata
+      
+      /**
+       This is a list of all GroupSessions vended over `DynamicGroupActivity.sessions` for this app
+       session. We track this to avoid desyncing JS / native view of sessions: e.g. with a group
+       session already established, reloading the dev JS app won't emit an event for that session
+       (so the user only has the option to replace that session; and in this case, doing so crashes
+       the client). With a static tracked set of sessions, JS client can ask native for any existing
+       sessions via `listActiveGroupSessions()` and avoid this issue.
+       */
+      public static var cachedSessions: [GroupSession<DynamicGroupActivity>] = []
     }
 
     @objc public class GroupMessengerParticipants: NSObject {}
@@ -179,16 +189,19 @@ import CoreTransferable
   }
   
   @objc public func listActiveGroupSessions() -> [T.GroupSessionRef] {
-    Array(
-      self.groupSessions
-        .filter {
-          if case .invalidated = $0.value.state {
-            return false
-          }
-          return true
-        }
-        .map { $0.key }
-    )
+    var sessionRefs: [T.GroupSessionRef] = []
+    for session in T.DynamicGroupActivity.cachedSessions {
+      if case .invalidated = session.state {
+        continue
+      }
+      
+      if let entry = groupSessions.first(where: { $0.value === session }) {
+        sessionRefs.append(entry.key)
+      } else {
+        sessionRefs.append(register(session))
+      }
+    }
+    return sessionRefs
   }
 
   private func register(_ session: GroupSession<T.DynamicGroupActivity>) -> T.GroupSessionRef {
@@ -226,6 +239,8 @@ import CoreTransferable
           ?? self.register(session.activity)
         let sessionRef = register(session)
         listener(activityRef, sessionRef)
+        
+        T.DynamicGroupActivity.cachedSessions.append(session)
       }
     }
     tasks.insert(task)
